@@ -115,10 +115,6 @@ def sort_enhance_images(images, task):
 def inpaint_mode_change(mode, inpaint_engine_version):
     assert mode in modules.flags.inpaint_options
 
-    # inpaint_additional_prompt, outpaint_selections, example_inpaint_prompts,
-    # inpaint_disable_initial_latent, inpaint_engine,
-    # inpaint_strength, inpaint_respective_field
-
     if mode == modules.flags.inpaint_option_detail:
         return [
             gr.update(visible=True), gr.update(visible=False, value=[]),
@@ -259,6 +255,25 @@ with shared.gradio_root:
                         with gr.Row():
                             with gr.Column():
                                 inpaint_input_image = grh.Image(label='Image', source='upload', type='numpy', tool='sketch', height=500, brush_color="#FFFFFF", elem_id='inpaint_canvas', show_label=False)
+                                
+                                # --- NEW LOGIC: Setup State and Listeners for Click-to-Select ---
+                                sam_click_points = gr.State([])
+                                sam_click_labels = gr.State([])
+
+                                def on_image_click(evt: gr.SelectData, current_points, current_labels):
+                                    current_points.append(evt.index)
+                                    current_labels.append(1)
+                                    return current_points, current_labels
+
+                                inpaint_input_image.select(
+                                    on_image_click, 
+                                    inputs=[sam_click_points, sam_click_labels], 
+                                    outputs=[sam_click_points, sam_click_labels]
+                                )
+                                inpaint_input_image.upload(lambda: ([], []), outputs=[sam_click_points, sam_click_labels], queue=False, show_progress=False)
+                                inpaint_input_image.clear(lambda: ([], []), outputs=[sam_click_points, sam_click_labels], queue=False, show_progress=False)
+                                # -----------------------------------------------------------------
+
                                 inpaint_advanced_masking_checkbox = gr.Checkbox(label='Enable Advanced Masking Features', value=modules.config.default_inpaint_advanced_masking_checkbox)
                                 inpaint_mode = gr.Dropdown(choices=modules.flags.inpaint_options, value=modules.config.default_inpaint_method, label='Method')
                                 inpaint_additional_prompt = gr.Textbox(placeholder="Describe what you want to inpaint.", elem_id='inpaint_additional_prompt', label='Inpaint Additional Prompt', visible=False)
@@ -280,7 +295,7 @@ with shared.gradio_root:
                                                              choices=flags.inpaint_mask_cloth_category,
                                                              value=modules.config.default_inpaint_mask_cloth_category,
                                                              visible=False)
-                                inpaint_mask_dino_prompt_text = gr.Textbox(label='Detection prompt', value='', visible=False, info='Use singular whenever possible', placeholder='Describe what you want to detect.')
+                                inpaint_mask_dino_prompt_text = gr.Textbox(label='Detection prompt', value='', visible=False, info='Use singular whenever possible', placeholder='Describe what you want to detect. (Or click on image)')
                                 example_inpaint_mask_dino_prompt_text = gr.Dataset(
                                     samples=modules.config.example_enhance_detection_prompts,
                                     label='Detection Prompt Quick List',
@@ -298,7 +313,8 @@ with shared.gradio_root:
                                     inpaint_mask_sam_max_detections = gr.Slider(label="Maximum number of detections", info="Set to 0 to detect all", minimum=0, maximum=10, value=modules.config.default_sam_max_detections, step=1, interactive=True)
                                 generate_mask_button = gr.Button(value='Generate mask from image')
 
-                                def generate_mask(image, mask_model, cloth_category, dino_prompt_text, sam_model, box_threshold, text_threshold, sam_max_detections, dino_erode_or_dilate, dino_debug):
+                                # --- NEW LOGIC: Pass click coordinates into the generator ---
+                                def generate_mask(image, mask_model, cloth_category, dino_prompt_text, sam_model, box_threshold, text_threshold, sam_max_detections, dino_erode_or_dilate, dino_debug, click_points, click_labels):
                                     from extras.inpaint_mask import generate_mask_from_image
 
                                     extras = {}
@@ -313,13 +329,18 @@ with shared.gradio_root:
                                             dino_erode_or_dilate=dino_erode_or_dilate,
                                             dino_debug=dino_debug,
                                             max_detections=sam_max_detections,
-                                            model_type=sam_model
+                                            model_type=sam_model,
+                                            point_coords=click_points if click_points else None,
+                                            point_labels=click_labels if click_labels else None
                                         )
 
                                     mask, _, _, _ = generate_mask_from_image(image, mask_model, extras, sam_options)
+                                    
+                                    # Clear memory points after mask is generated
+                                    click_points.clear()
+                                    click_labels.clear()
 
                                     return mask
-
 
                                 inpaint_mask_model.change(lambda x: [gr.update(visible=x == 'u2net_cloth_seg')] +
                                                                     [gr.update(visible=x == 'sam')] * 2 +
@@ -967,11 +988,13 @@ with shared.gradio_root:
                 engine, strength, respective_field
             ], show_progress=False, queue=False)
 
+        # --- NEW LOGIC: Pass click state coordinates to the generate mask button ---
         generate_mask_button.click(fn=generate_mask,
                                    inputs=[inpaint_input_image, inpaint_mask_model, inpaint_mask_cloth_category,
                                            inpaint_mask_dino_prompt_text, inpaint_mask_sam_model,
                                            inpaint_mask_box_threshold, inpaint_mask_text_threshold,
-                                           inpaint_mask_sam_max_detections, dino_erode_or_dilate, debugging_dino],
+                                           inpaint_mask_sam_max_detections, dino_erode_or_dilate, debugging_dino,
+                                           sam_click_points, sam_click_labels],
                                    outputs=inpaint_mask_image, show_progress=True, queue=True)
 
         ctrls = [currentTask, generate_image_grid]
