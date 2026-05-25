@@ -21,7 +21,11 @@ class SAMOptions:
 
                  # SAM
                  max_detections=2,
-                 model_type='vit_b'
+                 model_type='vit_b',
+                 
+                 # NEW: Add Point coordinates for click-to-select
+                 point_coords=None,
+                 point_labels=None
                  ):
         self.dino_prompt = dino_prompt
         self.dino_box_threshold = dino_box_threshold
@@ -30,6 +34,8 @@ class SAMOptions:
         self.dino_debug = dino_debug
         self.max_detections = max_detections
         self.model_type = model_type
+        self.point_coords = point_coords
+        self.point_labels = point_labels
 
 
 def optimize_masks(masks: torch.Tensor) -> torch.Tensor:
